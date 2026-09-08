@@ -114,16 +114,30 @@ func updateServiceEndpoint(clients *client.AggregatedClient, endpoint *serviceen
 
 func deleteServiceEndpoint(clients *client.AggregatedClient, serviceEndpoint *serviceendpoint.ServiceEndpoint, timeout time.Duration) error {
 	projectID := (*serviceEndpoint.ServiceEndpointProjectReferences)[0].ProjectReference.Id
-	if err := clients.ServiceEndpointClient.DeleteServiceEndpoint(
-		clients.Ctx,
-		serviceendpoint.DeleteServiceEndpointArgs{
-			ProjectIds: &[]string{
-				projectID.String(),
+
+	const (
+		maxAttempts   = 3
+		retryInterval = 5 * time.Second
+	)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err := clients.ServiceEndpointClient.DeleteServiceEndpoint(
+			clients.Ctx,
+			serviceendpoint.DeleteServiceEndpointArgs{
+				ProjectIds: &[]string{
+					projectID.String(),
+				},
+				EndpointId: serviceEndpoint.Id,
 			},
-			EndpointId: serviceEndpoint.Id,
-		},
-	); err != nil {
-		return fmt.Errorf("Delete service endpoint error %v", err)
+		)
+		if err == nil {
+			break
+		}
+		log.Printf("[DEBUG] Deleting service endpoint %s failed on attempt %d of %d, retrying. %v", serviceEndpoint.Id, attempt, maxAttempts, err)
+		if attempt < maxAttempts {
+			time.Sleep(retryInterval)
+		} else {
+			return fmt.Errorf("Delete service endpoint error %v", err)
+		}
 	}
 
 	stateConf := &retry.StateChangeConf{
